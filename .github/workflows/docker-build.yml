@@ -12,22 +12,18 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. 编译前端（包含已修改的高德地图）
+      # 1. 编译前端
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v3
-        with:
-          version: 9
-
       - name: Build Web
+        working-directory: ./web
         run: |
-          cd web
-          pnpm install --frozen-lockfile
-          pnpm build
+          corepack enable
+          corepack pnpm install
+          corepack pnpm build
 
       # 2. 准备 Docker 构建环境
       - name: Set up QEMU
