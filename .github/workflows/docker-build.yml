@@ -6,12 +6,13 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-frontend:
+  build-and-push:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # 1. 编译前端（高德地图定制）
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -26,36 +27,13 @@ jobs:
           pnpm install
           pnpm build
 
-      - name: Upload Web Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-dist
-          path: web/dist
+      # 2. 将前端产物同步到 Go 服务目录
+      - name: Prepare Go Static Files
+        run: |
+          mkdir -p server/dist
+          cp -r web/dist/* server/dist/
 
-  build-and-push:
-    needs: build-frontend
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Download Web Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-dist
-          path: server/dist
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.24'
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
+      # 3. 登录阿里云镜像仓库
       - name: Login to Aliyun Registry
         uses: docker/login-action@v3
         with:
@@ -63,9 +41,34 @@ jobs:
           username: ${{ secrets.ALIYUN_USERNAME }}
           password: ${{ secrets.ALIYUN_PASSWORD }}
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 4. 自动生成标准 Multi-stage Dockerfile 并打包推送
+      - name: Create Dockerfile
+        run: |
+          cat << 'EOF' > Dockerfile
+          FROM golang:1.24-alpine AS builder
+          WORKDIR /app
+          RUN apk add --no-cache gcc musl-dev
+          COPY go.mod go.sum ./
+          RUN go mod download
+          COPY . .
+          RUN CGO_ENABLED=1 GOOS=linux go build -trimpath -ldflags="-s -w" -o memos ./cmd/memos
+
+          FROM alpine:3.20
+          WORKDIR /var/opt/memos
+          RUN apk add --no-cache tzdata ca-certificates
+          COPY --from=builder /app/memos /usr/local/bin/memos
+          VOLUME /var/opt/memos
+          EXPOSE 5230
+          ENTRYPOINT ["memos"]
+          EOF
+
       - name: Build and Push
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: .github/workflows/build-canary-image.yml
-          push: false
+          file: ./Dockerfile
+          push: true
+          tags: registry.cn-hangzhou.aliyuncs.com/rabbitwx-images/memos:latest
