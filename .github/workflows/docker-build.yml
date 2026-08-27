@@ -44,7 +44,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 4. 自动生成标准 Multi-stage Dockerfile 并打包推送
+      # 4. 生成 Multi-stage Dockerfile
       - name: Create Dockerfile
         run: |
           cat << 'EOF' > Dockerfile
@@ -66,10 +66,12 @@ jobs:
           ENTRYPOINT ["memos"]
           EOF
 
+      # 5. 构建并推送（关闭 provenance 兼容阿里云）
       - name: Build and Push
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
           push: true
+          provenance: false
           tags: registry.cn-hangzhou.aliyuncs.com/rabbitwx-images/memos:latest
