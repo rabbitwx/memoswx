@@ -12,18 +12,18 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. 编译前端
+      # 1. 编译前端（升级至 Node.js 22 适配 pnpm 11+）
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Build Web
         working-directory: ./web
         run: |
           corepack enable
-          corepack pnpm install
-          corepack pnpm build
+          pnpm install
+          pnpm build
 
       # 2. 准备 Docker 构建环境
       - name: Set up QEMU
