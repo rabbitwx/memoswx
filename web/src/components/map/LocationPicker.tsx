@@ -84,22 +84,22 @@ interface ControlButtonsProps {
   position: MapPoint | undefined;
   onZoomIn: () => void;
   onZoomOut: () => void;
-  onOpenGoogleMaps: () => void;
+  onOpenAmap: () => void;
 }
 
-const ControlButtons = ({ position, onZoomIn, onZoomOut, onOpenGoogleMaps }: ControlButtonsProps) => {
+const ControlButtons = ({ position, onZoomIn, onZoomOut, onOpenAmap }: ControlButtonsProps) => {
   return (
     <div className="flex flex-col gap-1.5">
       {position && (
         <GlassButton
           icon={<ExternalLinkIcon size={16} className="text-foreground" />}
-          onClick={onOpenGoogleMaps}
-          ariaLabel="Open location in Google Maps"
-          title="Open in Google Maps"
+          onClick={onOpenAmap}
+          ariaLabel="在外部地图中打开"
+          title="在高德地图中打开"
         />
       )}
-      <GlassButton icon={<PlusIcon size={16} className="text-foreground" />} onClick={onZoomIn} ariaLabel="Zoom in" title="Zoom in" />
-      <GlassButton icon={<MinusIcon size={16} className="text-foreground" />} onClick={onZoomOut} ariaLabel="Zoom out" title="Zoom out" />
+      <GlassButton icon={<PlusIcon size={16} className="text-foreground" />} onClick={onZoomIn} ariaLabel="放大" title="放大" />
+      <GlassButton icon={<MinusIcon size={16} className="text-foreground" />} onClick={onZoomOut} ariaLabel="缩小" title="缩小" />
     </div>
   );
 };
@@ -137,9 +137,10 @@ const MapControls = ({ position }: MapControlsProps) => {
   const controlRef = useRef<MapControlsContainer | null>(null);
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
 
-  const handleOpenInGoogleMaps = () => {
+  // 跳转到高德地图标注页
+  const handleOpenInAmap = () => {
     if (!position) return;
-    const url = `https://www.google.com/maps?q=${position.lat},${position.lng}`;
+    const url = `https://uri.amap.com/marker?position=${position.lng},${position.lat}&name=选定位置`;
     window.open(url, "_blank", "noopener,noreferrer");
   };
 
@@ -172,7 +173,7 @@ const MapControls = ({ position }: MapControlsProps) => {
   }
 
   return createPortal(
-    <ControlButtons position={position} onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} onOpenGoogleMaps={handleOpenInGoogleMaps} />,
+    <ControlButtons position={position} onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} onOpenAmap={handleOpenInAmap} />,
     container,
   );
 };
@@ -211,7 +212,7 @@ const noopOnLocationChange = () => {};
 const LocationPicker = ({ readonly: readOnly = false, latlng, onChange = noopOnLocationChange, className }: LocationPickerProps) => {
   const mapCenter = useMemo(() => toLatLng(latlng ?? DEFAULT_CENTER), [latlng?.lat, latlng?.lng]);
   const markerPosition = mapCenter;
-  const statusLabel = readOnly ? "Pinned location" : latlng ? "Selected location" : "Choose a location";
+  const statusLabel = readOnly ? "固定位置" : latlng ? "已选位置" : "选择位置";
 
   return (
     <div
