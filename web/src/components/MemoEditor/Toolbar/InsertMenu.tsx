@@ -94,19 +94,28 @@ const InsertMenu = (props: InsertMenuProps) => {
     setLinkDialogOpen(true);
   }, []);
 
-  // 高德 IP 定位（绕过浏览器安全策略，支持任意 HTTP/内网/P2P 环境）
+  // 高德 IP 定位（计算矩形中心点，兼容城市/省份兜底解析）
   const locateByAmapIp = useCallback(async () => {
     try {
       const res = await fetch(`https://restapi.amap.com/v3/ip?key=${AMAP_KEY}`);
       const data = await res.json();
       if (data.status === "1") {
-        let lng = 116.4074;
-        let lat = 39.9042;
-        if (typeof data.rectangle === "string" && data.rectangle.length > 0) {
-          const parts = data.rectangle.split(";")[0].split(",");
-          lng = parseFloat(parts[0]);
-          lat = parseFloat(parts[1]);
-        } else if (data.city && typeof data.city === "string" && data.city !== "[]") {
+        let lng: number | null = null;
+        let lat: number | null = null;
+
+        // 1. 解析矩形范围，计算城市中心经纬度
+        if (typeof data.rectangle === "string" && data.rectangle.includes(";")) {
+          const [point1, point2] = data.rectangle.split(";");
+          const [lng1, lat1] = point1.split(",").map(Number);
+          const [lng2, lat2] = point2.split(",").map(Number);
+          if (!isNaN(lng1) && !isNaN(lat1) && !isNaN(lng2) && !isNaN(lat2)) {
+            lng = (lng1 + lng2) / 2;
+            lat = (lat1 + lat2) / 2;
+          }
+        }
+
+        // 2. 若 rectangle 为空，通过城市名解析中心点
+        if ((!lat || !lng) && typeof data.city === "string" && data.city.length > 0 && data.city !== "[]") {
           const geoRes = await fetch(
             `https://restapi.amap.com/v3/geocode/geo?key=${AMAP_KEY}&address=${encodeURIComponent(data.city)}`
           );
@@ -117,7 +126,21 @@ const InsertMenu = (props: InsertMenuProps) => {
             lat = parseFloat(loc[1]);
           }
         }
-        if (!isNaN(lat) && !isNaN(lng)) {
+
+        // 3. 若城市名为空，通过省份名解析中心点
+        if ((!lat || !lng) && typeof data.province === "string" && data.province.length > 0 && data.province !== "[]") {
+          const geoRes = await fetch(
+            `https://restapi.amap.com/v3/geocode/geo?key=${AMAP_KEY}&address=${encodeURIComponent(data.province)}`
+          );
+          const geoData = await geoRes.json();
+          if (geoData.status === "1" && geoData.geocodes?.length > 0) {
+            const loc = geoData.geocodes[0].location.split(",");
+            lng = parseFloat(loc[0]);
+            lat = parseFloat(loc[1]);
+          }
+        }
+
+        if (lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng)) {
           handleLocationPositionChange({ lat, lng });
         }
       }
@@ -140,7 +163,6 @@ const InsertMenu = (props: InsertMenuProps) => {
           { timeout: 3000, enableHighAccuracy: true }
         );
       } else {
-        // 在 HTTP / P2P 非安全环境下，直接使用高德 IP 定位
         locateByAmapIp();
       }
     }
@@ -178,7 +200,6 @@ const InsertMenu = (props: InsertMenuProps) => {
     [props.onInsertImages],
   );
 
-  // Insert actions (add content).
   const insertItems = [
     { key: "attachment", label: t("editor.insert-menu.add-attachment"), icon: PaperclipIcon, onClick: handleAttachmentUploadClick },
     { key: "inline-image", label: t("editor.insert-menu.insert-image"), icon: ImageIcon, onClick: handleInlineImageUploadClick },
@@ -217,7 +238,6 @@ const InsertMenu = (props: InsertMenuProps) => {
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {/* Hidden file input */}
       <input
         className="hidden"
         ref={fileInputRef}
