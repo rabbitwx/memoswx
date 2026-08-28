@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
-// 将引号内替换为你的高德 Web服务 API Key
-const AMAP_KEY = "6a2f975d720f0361ebdaa3e6da0c2d86";
+// 填入你的高德 Web服务 Key
+const AMAP_KEY = "58fdd188849b29db42d76508868bf452"; // 请确认填入完整的Key
 
 export const useReverseGeocoding = (lat: number | undefined, lng: number | undefined) => {
   return useQuery({
@@ -11,18 +11,38 @@ export const useReverseGeocoding = (lat: number | undefined, lng: number | undef
       if (lat === undefined || lng === undefined) return "";
 
       try {
-        // 高德逆地理编码接口，经纬度格式为：lng,lat
-        const res = await fetch(
-          `https://restapi.amap.com/v3/geocode/regeo?key=${AMAP_KEY}&location=${lng},${lat}&output=json&extensions=base`
-        );
-        const data = await res.json();
-        
-        if (data.status === "1" && data.regeocode?.formatted_address) {
-          return data.regeocode.formatted_address as string;
+        if (AMAP_KEY) {
+          // 高德逆地理编码
+          const res = await fetch(
+            `https://restapi.amap.com/v3/geocode/regeo?key=${AMAP_KEY}&location=${lng},${lat}&output=json&extensions=base`,
+            { mode: "cors" }
+          );
+          const data = await res.json();
+          
+          if (data.status === "1" && data.regeocode && data.regeocode.formatted_address) {
+            const addr = data.regeocode.formatted_address;
+            if (typeof addr === "string" && addr.length > 0 && addr !== "[]") {
+              return addr;
+            }
+          }
         }
+
+        // 备用 OpenStreetMap 中文解析
+        const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&accept-language=zh-CN`;
+        const response = await fetch(url, {
+          headers: {
+            "User-Agent": "Memos/1.0",
+            Accept: "application/json",
+          },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data?.display_name) return data.display_name as string;
+        }
+
         return coordString;
       } catch (error) {
-        console.error("高德逆地理编码请求失败:", error);
+        console.error("Failed to fetch reverse geocoding data:", error);
         return coordString;
       }
     },
