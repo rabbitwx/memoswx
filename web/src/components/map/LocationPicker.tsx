@@ -31,7 +31,7 @@ const LocationMarker = ({ position, onChange, readonly: readOnly }: LocationMark
 
   useEffect(() => {
     if (position) {
-      map.setView(position, map.getZoom());
+      map.setView(position, map.getZoom() > 12 ? map.getZoom() : 14);
     }
   }, [position, map]);
 
@@ -134,23 +134,43 @@ const MapControls = ({ position, onLocationSelect }: MapControlsProps) => {
   const handleLocate = async (e: React.MouseEvent) => {
     e.stopPropagation();
 
-    const ipLocate = async () => {
+    const doAmapIpLocate = async () => {
       try {
         const res = await fetch(`https://restapi.amap.com/v3/ip?key=${AMAP_KEY}`);
         const data = await res.json();
-        if (data.status === "1" && data.rectangle && typeof data.rectangle === "string") {
-          const rectParts = data.rectangle.split(";")[0].split(",");
-          const lng = parseFloat(rectParts[0]);
-          const lat = parseFloat(rectParts[1]);
-          if (!isNaN(lat) && !isNaN(lng)) {
-            const pt = { lat, lng };
-            map.setView(new LatLng(lat, lng), 14);
+
+        if (data.status === "1") {
+          let targetLng: number | null = null;
+          let targetLat: number | null = null;
+
+          // 1. 如果返回了矩形边界范围
+          if (typeof data.rectangle === "string" && data.rectangle.length > 0) {
+            const parts = data.rectangle.split(";")[0].split(",");
+            targetLng = parseFloat(parts[0]);
+            targetLat = parseFloat(parts[1]);
+          } 
+          // 2. 如果 rectangle 为空，则根据城市名称进行地理编码解析
+          else if (data.city && typeof data.city === "string" && data.city !== "[]") {
+            const geoRes = await fetch(
+              `https://restapi.amap.com/v3/geocode/geo?key=${AMAP_KEY}&address=${encodeURIComponent(data.city)}`
+            );
+            const geoData = await geoRes.json();
+            if (geoData.status === "1" && geoData.geocodes?.length > 0) {
+              const loc = geoData.geocodes[0].location.split(",");
+              targetLng = parseFloat(loc[0]);
+              targetLat = parseFloat(loc[1]);
+            }
+          }
+
+          if (targetLat !== null && targetLng !== null && !isNaN(targetLat) && !isNaN(targetLng)) {
+            const pt = { lat: targetLat, lng: targetLng };
+            map.setView(new LatLng(pt.lat, pt.lng), 14);
             onLocationSelect(pt);
             return true;
           }
         }
       } catch (err) {
-        console.error("高德 IP 定位失败:", err);
+        console.error("IP 定位解析失败:", err);
       }
       return false;
     };
@@ -163,12 +183,12 @@ const MapControls = ({ position, onLocationSelect }: MapControlsProps) => {
           onLocationSelect(pt);
         },
         async () => {
-          await ipLocate();
+          await doAmapIpLocate();
         },
         { enableHighAccuracy: true, timeout: 3000 }
       );
     } else {
-      await ipLocate();
+      await doAmapIpLocate();
     }
   };
 
@@ -232,9 +252,20 @@ const LocationPicker = ({
   onChange = () => {},
   className,
 }: LocationPickerProps) => {
-  const mapCenter = useMemo(() => toLatLng(latlng ?? DEFAULT_CENTER), [latlng?.lat, latlng?.lng]);
-  const markerPosition = useMemo(() => (latlng ? toLatLng(latlng) : undefined), [latlng]);
-  const statusLabel = readOnly ? "固定位置" : latlng ? "已选位置" : "选择位置";
+  const [internalPoint, setInternalPoint] = useState<MapPoint | undefined>(latlng);
+
+  useEffect(() => {
+    setInternalPoint(latlng);
+  }, [latlng]);
+
+  const handleSelect = (pt: MapPoint) => {
+    setInternalPoint(pt);
+    onChange(pt);
+  };
+
+  const mapCenter = useMemo(() => toLatLng(internalPoint ?? DEFAULT_CENTER), [internalPoint?.lat, internalPoint?.lng]);
+  const markerPosition = useMemo(() => (internalPoint ? toLatLng(internalPoint) : undefined), [internalPoint]);
+  const statusLabel = readOnly ? "固定位置" : internalPoint ? "已选位置" : "选择位置";
 
   return (
     <div
@@ -252,8 +283,8 @@ const LocationPicker = ({
         attributionControl={false}
       >
         <ThemedTileLayer />
-        <LocationMarker position={markerPosition} readonly={readOnly} onChange={onChange} />
-        <MapControls position={latlng} onLocationSelect={onChange} />
+        <LocationMarker position={markerPosition} readonly={readOnly} onChange={handleSelect} />
+        <MapControls position={internalPoint} onLocationSelect={handleSelect} />
         <MapCleanup />
       </MapContainer>
 
