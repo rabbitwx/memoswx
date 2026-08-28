@@ -12,7 +12,11 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. 登录阿里云
+      # 1. 移除 .dockerignore 限制，确保前端代码能传入 Docker 构建上下文
+      - name: Remove Dockerignore
+        run: rm -f .dockerignore
+
+      # 2. 登录阿里云镜像仓库
       - name: Login to Aliyun Registry
         uses: docker/login-action@v3
         with:
@@ -23,11 +27,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 2. 生成全流程纯净 Multi-stage Dockerfile
+      # 3. 容器内完整多阶段构建（前端 -> 后端嵌入 -> 最终镜像）
       - name: Create Dockerfile
         run: |
           cat << 'EOF' > Dockerfile
-          # --- Stage 1: 前端编译 ---
+          # --- Stage 1: 前端构建 ---
           FROM node:22-alpine AS frontend
           WORKDIR /web
           RUN corepack enable
@@ -36,7 +40,7 @@ jobs:
           COPY web/ ./
           RUN pnpm build
 
-          # --- Stage 2: Go 后端编译 ---
+          # --- Stage 2: Go 后端构建（注入前端静态资源） ---
           FROM golang:alpine AS backend
           WORKDIR /app
           ENV GOTOOLCHAIN=auto
@@ -44,13 +48,12 @@ jobs:
           COPY go.mod go.sum ./
           RUN go mod download
           COPY . .
-          # 将 Stage 1 编译出来的前端静态文件注入到所有可能匹配的嵌入路径
           COPY --from=frontend /web/dist /app/server/router/frontend/dist
           COPY --from=frontend /web/dist /app/server/dist
           COPY --from=frontend /web/dist /app/web/dist
           RUN CGO_ENABLED=1 GOOS=linux go build -trimpath -ldflags="-s -w" -o memos ./cmd/memos
 
-          # --- Stage 3: 最小运行镜像 ---
+          # --- Stage 3: 最小运行时环境 ---
           FROM alpine:latest
           WORKDIR /var/opt/memos
           RUN apk add --no-cache tzdata ca-certificates
@@ -60,7 +63,7 @@ jobs:
           ENTRYPOINT ["memos"]
           EOF
 
-      # 3. 执行构建并推送
+      # 4. 构建并推送到阿里云
       - name: Build and Push
         uses: docker/build-push-action@v5
         with:
