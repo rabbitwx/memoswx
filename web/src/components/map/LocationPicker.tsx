@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { defaultMarkerIcon, ThemedTileLayer } from "./map-utils";
 import type { MapPoint } from "./types";
 
-const AMAP_KEY = "58fdd188849b29db42d76508868bf452";
+const AMAP_KEY = "146dac968efd2ed50c05a3c3fa2c8cf6";
 
 const toLatLng = (point: MapPoint): LatLng => new LatLng(point.lat, point.lng);
 const fromLatLng = (latlng: LatLng): MapPoint => ({ lat: latlng.lat, lng: latlng.lng });
