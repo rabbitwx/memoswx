@@ -12,7 +12,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. 编译前端（高德地图定制）
+      # 1. 编译前端（包含修改的高德地图）
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -27,11 +27,13 @@ jobs:
           pnpm install
           pnpm build
 
-      # 2. 将前端产物同步到 Go 服务目录
+      # 2. 将前端产物同步到 Go 服务内置静态目录
       - name: Prepare Go Static Files
         run: |
+          mkdir -p server/router/frontend/dist
           mkdir -p server/dist
-          cp -r web/dist/* server/dist/
+          cp -r web/dist/* server/router/frontend/dist/ 2>/dev/null || true
+          cp -r web/dist/* server/dist/ 2>/dev/null || true
 
       # 3. 登录阿里云镜像仓库
       - name: Login to Aliyun Registry
