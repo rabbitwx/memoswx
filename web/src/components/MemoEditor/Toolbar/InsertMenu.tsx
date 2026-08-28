@@ -31,6 +31,8 @@ import { useEditorContext, useEditorSelector } from "../state";
 import type { InsertMenuProps } from "../types";
 import type { LocalFile } from "../types/attachment";
 
+const AMAP_KEY = "58fdd188849b29db42d76508868bf452";
+
 const InsertMenu = (props: InsertMenuProps) => {
   const t = useTranslate();
   const { actions, dispatch, getState } = useEditorContext();
@@ -92,21 +94,57 @@ const InsertMenu = (props: InsertMenuProps) => {
     setLinkDialogOpen(true);
   }, []);
 
+  // 高德 IP 定位（绕过浏览器安全策略，支持任意 HTTP/内网/P2P 环境）
+  const locateByAmapIp = useCallback(async () => {
+    try {
+      const res = await fetch(`https://restapi.amap.com/v3/ip?key=${AMAP_KEY}`);
+      const data = await res.json();
+      if (data.status === "1") {
+        let lng = 116.4074;
+        let lat = 39.9042;
+        if (typeof data.rectangle === "string" && data.rectangle.length > 0) {
+          const parts = data.rectangle.split(";")[0].split(",");
+          lng = parseFloat(parts[0]);
+          lat = parseFloat(parts[1]);
+        } else if (data.city && typeof data.city === "string" && data.city !== "[]") {
+          const geoRes = await fetch(
+            `https://restapi.amap.com/v3/geocode/geo?key=${AMAP_KEY}&address=${encodeURIComponent(data.city)}`
+          );
+          const geoData = await geoRes.json();
+          if (geoData.status === "1" && geoData.geocodes?.length > 0) {
+            const loc = geoData.geocodes[0].location.split(",");
+            lng = parseFloat(loc[0]);
+            lat = parseFloat(loc[1]);
+          }
+        }
+        if (!isNaN(lat) && !isNaN(lng)) {
+          handleLocationPositionChange({ lat, lng });
+        }
+      }
+    } catch (err) {
+      console.error("高德 IP 定位失败:", err);
+    }
+  }, [handleLocationPositionChange]);
+
   const handleLocationClick = useCallback(() => {
     setLocationDialogOpen(true);
     if (!initialLocation && !locationInitialized) {
-      if (navigator.geolocation) {
+      if (window.isSecureContext && navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           (position) => {
             handleLocationPositionChange({ lat: position.coords.latitude, lng: position.coords.longitude });
           },
-          (error) => {
-            console.error("Geolocation error:", error);
+          async () => {
+            await locateByAmapIp();
           },
+          { timeout: 3000, enableHighAccuracy: true }
         );
+      } else {
+        // 在 HTTP / P2P 非安全环境下，直接使用高德 IP 定位
+        locateByAmapIp();
       }
     }
-  }, [initialLocation, locationInitialized, handleLocationPositionChange]);
+  }, [initialLocation, locationInitialized, handleLocationPositionChange, locateByAmapIp]);
 
   const handleLocationConfirm = useCallback(() => {
     const newLocation = getLocation();
@@ -162,8 +200,6 @@ const InsertMenu = (props: InsertMenuProps) => {
               {item.label}
             </DropdownMenuItem>
           ))}
-          {/* View toggles: focus mode + formatting-toolbar visibility. Absent
-              when a host owns the editor's presentation — neither applies there. */}
           {viewToggles && (
             <>
               <DropdownMenuSeparator />
