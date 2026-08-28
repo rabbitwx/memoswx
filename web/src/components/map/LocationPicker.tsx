@@ -1,6 +1,6 @@
 import L, { LatLng } from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { ExternalLinkIcon, MinusIcon, PlusIcon } from "lucide-react";
+import { ExternalLinkIcon, LocateFixedIcon, MinusIcon, PlusIcon } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { MapContainer, Marker, useMap, useMapEvents } from "react-leaflet";
@@ -28,18 +28,28 @@ const LocationMarker = ({ position: initialPosition, onChange, readonly: readOnl
       }
 
       setPosition(e.latlng);
-      map.locate();
       onChange(fromLatLng(e.latlng));
     },
-    locationfound() {},
+    locationfound(e) {
+      // 首次加载若无预设位置，定位成功后自动移动视野、打点并触发地址解析
+      if (!initialPosition) {
+        setPosition(e.latlng);
+        map.setView(e.latlng, 15);
+        onChange(fromLatLng(e.latlng));
+      }
+    },
+    locationerror(e) {
+      console.warn("自动定位失败，降级为默认中心:", e.message);
+    },
   });
 
   useEffect(() => {
-    if (!initializedRef.current) {
-      map.locate();
+    if (!initializedRef.current && !initialPosition && !readOnly) {
+      // 开启高精度定位与自动平移
+      map.locate({ setView: true, maxZoom: 15, enableHighAccuracy: true });
       initializedRef.current = true;
     }
-  }, [map]);
+  }, [map, initialPosition, readOnly]);
 
   useEffect(() => {
     if (initialPosition) {
@@ -84,20 +94,27 @@ interface ControlButtonsProps {
   position: MapPoint | undefined;
   onZoomIn: () => void;
   onZoomOut: () => void;
+  onLocate: () => void;
   onOpenAmap: () => void;
 }
 
-const ControlButtons = ({ position, onZoomIn, onZoomOut, onOpenAmap }: ControlButtonsProps) => {
+const ControlButtons = ({ position, onZoomIn, onZoomOut, onLocate, onOpenAmap }: ControlButtonsProps) => {
   return (
     <div className="flex flex-col gap-1.5">
       {position && (
         <GlassButton
           icon={<ExternalLinkIcon size={16} className="text-foreground" />}
           onClick={onOpenAmap}
-          ariaLabel="在外部地图中打开"
+          ariaLabel="在高德地图中打开"
           title="在高德地图中打开"
         />
       )}
+      <GlassButton
+        icon={<LocateFixedIcon size={16} className="text-foreground" />}
+        onClick={onLocate}
+        ariaLabel="定位到当前位置"
+        title="定位到当前位置"
+      />
       <GlassButton icon={<PlusIcon size={16} className="text-foreground" />} onClick={onZoomIn} ariaLabel="放大" title="放大" />
       <GlassButton icon={<MinusIcon size={16} className="text-foreground" />} onClick={onZoomOut} ariaLabel="缩小" title="缩小" />
     </div>
@@ -130,18 +147,40 @@ class MapControlsContainer extends L.Control {
 
 interface MapControlsProps {
   position: MapPoint | undefined;
+  onLocationSelect?: (position: MapPoint) => void;
 }
 
-const MapControls = ({ position }: MapControlsProps) => {
+const MapControls = ({ position, onLocationSelect }: MapControlsProps) => {
   const map = useMap();
   const controlRef = useRef<MapControlsContainer | null>(null);
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
 
-  // 跳转到高德地图标注页
+  // 跳转高德地图标注
   const handleOpenInAmap = () => {
     if (!position) return;
     const url = `https://uri.amap.com/marker?position=${position.lng},${position.lat}&name=选定位置`;
     window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  // 手动点击重新触发定位
+  const handleLocate = () => {
+    map.locate({ setView: true, maxZoom: 15, enableHighAccuracy: true });
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const currentPoint = {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+          };
+          map.setView(new LatLng(currentPoint.lat, currentPoint.lng), 15);
+          onLocationSelect?.(currentPoint);
+        },
+        (err) => {
+          console.warn("获取定位失败:", err.message);
+        },
+        { enableHighAccuracy: true, timeout: 8000 },
+      );
+    }
   };
 
   const handleZoomIn = () => {
@@ -153,7 +192,6 @@ const MapControls = ({ position }: MapControlsProps) => {
   };
 
   useEffect(() => {
-    // Create custom Leaflet control
     const control = new MapControlsContainer({ position: "topright" });
     controlRef.current = control;
     control.addTo(map);
@@ -173,7 +211,13 @@ const MapControls = ({ position }: MapControlsProps) => {
   }
 
   return createPortal(
-    <ControlButtons position={position} onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} onOpenAmap={handleOpenInAmap} />,
+    <ControlButtons
+      position={position}
+      onZoomIn={handleZoomIn}
+      onZoomOut={handleZoomOut}
+      onLocate={handleLocate}
+      onOpenAmap={handleOpenInAmap}
+    />,
     container,
   );
 };
@@ -183,7 +227,6 @@ const MapCleanup = () => {
 
   useEffect(() => {
     return () => {
-      // Cleanup map instance when component unmounts
       setTimeout(() => {
         if (map) {
           try {
@@ -231,7 +274,7 @@ const LocationPicker = ({ readonly: readOnly = false, latlng, onChange = noopOnL
       >
         <ThemedTileLayer />
         <LocationMarker position={markerPosition} readonly={readOnly} onChange={onChange} />
-        <MapControls position={latlng} />
+        <MapControls position={latlng} onLocationSelect={onChange} />
         <MapCleanup />
       </MapContainer>
 
