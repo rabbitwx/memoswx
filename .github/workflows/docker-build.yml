@@ -12,32 +12,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. 编译前端
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Install pnpm
-        run: corepack enable
-
-      - name: Build Web
-        working-directory: ./web
-        run: |
-          pnpm install
-          pnpm build
-
-      # 2. 将编译好的前端产物放进 Go 嵌入目录并清理 .dockerignore 中的 dist 忽略
-      - name: Prepare Go Static Files
-        run: |
-          mkdir -p server/router/frontend/dist
-          cp -r web/dist/* server/router/frontend/dist/
-          # 确保根目录的 .dockerignore 不会过滤掉我们刚刚生成的静态文件
-          if [ -f .dockerignore ]; then
-            sed -i '/dist/d' .dockerignore
-          fi
-
-      # 3. 登录阿里云
+      # 1. 登录阿里云
       - name: Login to Aliyun Registry
         uses: docker/login-action@v3
         with:
@@ -48,29 +23,44 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 4. 生成编译 Dockerfile
+      # 2. 生成全流程纯净 Multi-stage Dockerfile
       - name: Create Dockerfile
         run: |
           cat << 'EOF' > Dockerfile
-          FROM golang:alpine AS builder
+          # --- Stage 1: 前端编译 ---
+          FROM node:22-alpine AS frontend
+          WORKDIR /web
+          RUN corepack enable
+          COPY web/package.json web/pnpm-lock.yaml ./
+          RUN pnpm install --frozen-lockfile
+          COPY web/ ./
+          RUN pnpm build
+
+          # --- Stage 2: Go 后端编译 ---
+          FROM golang:alpine AS backend
           WORKDIR /app
           ENV GOTOOLCHAIN=auto
           RUN apk add --no-cache gcc musl-dev git
           COPY go.mod go.sum ./
           RUN go mod download
           COPY . .
+          # 将 Stage 1 编译出来的前端静态文件注入到所有可能匹配的嵌入路径
+          COPY --from=frontend /web/dist /app/server/router/frontend/dist
+          COPY --from=frontend /web/dist /app/server/dist
+          COPY --from=frontend /web/dist /app/web/dist
           RUN CGO_ENABLED=1 GOOS=linux go build -trimpath -ldflags="-s -w" -o memos ./cmd/memos
 
+          # --- Stage 3: 最小运行镜像 ---
           FROM alpine:latest
           WORKDIR /var/opt/memos
           RUN apk add --no-cache tzdata ca-certificates
-          COPY --from=builder /app/memos /usr/local/bin/memos
+          COPY --from=backend /app/memos /usr/local/bin/memos
           VOLUME /var/opt/memos
           EXPOSE 5230
           ENTRYPOINT ["memos"]
           EOF
 
-      # 5. 构建并推送
+      # 3. 执行构建并推送
       - name: Build and Push
         uses: docker/build-push-action@v5
         with:
