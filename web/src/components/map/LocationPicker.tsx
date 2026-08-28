@@ -19,27 +19,23 @@ interface LocationMarkerProps {
   readonly?: boolean;
 }
 
-const LocationMarker = ({ position: initialPosition, onChange, readonly: readOnly }: LocationMarkerProps) => {
-  const [position, setPosition] = useState(initialPosition);
+const LocationMarker = ({ position, onChange, readonly: readOnly }: LocationMarkerProps) => {
+  const map = useMap();
 
-  const map = useMapEvents({
+  useMapEvents({
     click(e) {
       if (readOnly) return;
-      setPosition(e.latlng);
       onChange(fromLatLng(e.latlng));
     },
   });
 
   useEffect(() => {
-    if (initialPosition) {
-      setPosition(initialPosition);
-      map.setView(initialPosition, map.getZoom());
-    } else {
-      setPosition(undefined);
+    if (position) {
+      map.setView(position, map.getZoom());
     }
-  }, [initialPosition, map]);
+  }, [position, map]);
 
-  return position === undefined ? null : <Marker position={position} icon={defaultMarkerIcon}></Marker>;
+  return position ? <Marker position={position} icon={defaultMarkerIcon} /> : null;
 };
 
 interface GlassButtonProps {
@@ -120,7 +116,7 @@ class MapControlsContainer extends L.Control {
 
 interface MapControlsProps {
   position: MapPoint | undefined;
-  onLocationSelect?: (position: MapPoint) => void;
+  onLocationSelect: (position: MapPoint) => void;
 }
 
 const MapControls = ({ position, onLocationSelect }: MapControlsProps) => {
@@ -138,7 +134,6 @@ const MapControls = ({ position, onLocationSelect }: MapControlsProps) => {
   const handleLocate = async (e: React.MouseEvent) => {
     e.stopPropagation();
 
-    // 1. IP 定位函数
     const ipLocate = async () => {
       try {
         const res = await fetch(`https://restapi.amap.com/v3/ip?key=${AMAP_KEY}`);
@@ -150,29 +145,27 @@ const MapControls = ({ position, onLocationSelect }: MapControlsProps) => {
           if (!isNaN(lat) && !isNaN(lng)) {
             const pt = { lat, lng };
             map.setView(new LatLng(lat, lng), 14);
-            onLocationSelect?.(pt);
+            onLocationSelect(pt);
             return true;
           }
         }
       } catch (err) {
-        console.error("IP 定位异常:", err);
+        console.error("高德 IP 定位失败:", err);
       }
       return false;
     };
 
-    // 2. 浏览器原生定位（优先使用）
-    if (navigator.geolocation) {
+    if (window.isSecureContext && navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           const pt = { lat: pos.coords.latitude, lng: pos.coords.longitude };
           map.setView(new LatLng(pt.lat, pt.lng), 16);
-          onLocationSelect?.(pt);
+          onLocationSelect(pt);
         },
         async () => {
-          // GPS 失败或超时，自动转 IP 定位
           await ipLocate();
         },
-        { enableHighAccuracy: true, timeout: 4000 }
+        { enableHighAccuracy: true, timeout: 3000 }
       );
     } else {
       await ipLocate();
@@ -228,7 +221,6 @@ interface LocationPickerProps {
   readonly?: boolean;
   latlng?: MapPoint;
   onChange?: (position: MapPoint) => void;
-  onLocationChange?: (position: MapPoint) => void;
   className?: string;
 }
 
@@ -237,14 +229,11 @@ const DEFAULT_CENTER: MapPoint = { lat: 39.9042, lng: 116.4074 };
 const LocationPicker = ({
   readonly: readOnly = false,
   latlng,
-  onChange,
-  onLocationChange,
+  onChange = () => {},
   className,
 }: LocationPickerProps) => {
-  // 兼容不同的 prop 命名 (onChange / onLocationChange)
-  const handleChange = onChange || onLocationChange || (() => {});
   const mapCenter = useMemo(() => toLatLng(latlng ?? DEFAULT_CENTER), [latlng?.lat, latlng?.lng]);
-  const markerPosition = latlng ? toLatLng(latlng) : undefined;
+  const markerPosition = useMemo(() => (latlng ? toLatLng(latlng) : undefined), [latlng]);
   const statusLabel = readOnly ? "固定位置" : latlng ? "已选位置" : "选择位置";
 
   return (
@@ -263,8 +252,8 @@ const LocationPicker = ({
         attributionControl={false}
       >
         <ThemedTileLayer />
-        <LocationMarker position={markerPosition} readonly={readOnly} onChange={handleChange} />
-        <MapControls position={latlng} onLocationSelect={handleChange} />
+        <LocationMarker position={markerPosition} readonly={readOnly} onChange={onChange} />
+        <MapControls position={latlng} onLocationSelect={onChange} />
         <MapCleanup />
       </MapContainer>
 
