@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils";
 import { defaultMarkerIcon, ThemedTileLayer } from "./map-utils";
 import type { MapPoint } from "./types";
 
+const AMAP_KEY = "58fdd188849b29db42d76508868bf452";
+
 const toLatLng = (point: MapPoint): LatLng => new LatLng(point.lat, point.lng);
 const fromLatLng = (latlng: LatLng): MapPoint => ({ lat: latlng.lat, lng: latlng.lng });
 
@@ -19,51 +21,26 @@ interface LocationMarkerProps {
 
 const LocationMarker = ({ position: initialPosition, onChange, readonly: readOnly }: LocationMarkerProps) => {
   const [position, setPosition] = useState(initialPosition);
-  const initializedRef = useRef(false);
 
-  const map = useMapEvents({
+  useMapEvents({
     click(e) {
-      if (readOnly) {
-        return;
-      }
-
+      if (readOnly) return;
       setPosition(e.latlng);
       onChange(fromLatLng(e.latlng));
-    },
-    locationfound(e) {
-      // 首次加载若无预设位置，定位成功后自动移动视野、打点并触发地址解析
-      if (!initialPosition) {
-        setPosition(e.latlng);
-        map.setView(e.latlng, 15);
-        onChange(fromLatLng(e.latlng));
-      }
-    },
-    locationerror(e) {
-      console.warn("自动定位失败，降级为默认中心:", e.message);
     },
   });
 
   useEffect(() => {
-    if (!initializedRef.current && !initialPosition && !readOnly) {
-      // 开启高精度定位与自动平移
-      map.locate({ setView: true, maxZoom: 15, enableHighAccuracy: true });
-      initializedRef.current = true;
-    }
-  }, [map, initialPosition, readOnly]);
-
-  useEffect(() => {
     if (initialPosition) {
       setPosition(initialPosition);
-      map.setView(initialPosition);
     } else {
       setPosition(undefined);
     }
-  }, [initialPosition, map]);
+  }, [initialPosition]);
 
   return position === undefined ? null : <Marker position={position} icon={defaultMarkerIcon}></Marker>;
 };
 
-// Reusable glass-style button component
 interface GlassButtonProps {
   icon: ReactNode;
   onClick: () => void;
@@ -89,7 +66,6 @@ const GlassButton = ({ icon, onClick, ariaLabel, title }: GlassButtonProps) => {
   );
 };
 
-// Container for all map control buttons
 interface ControlButtonsProps {
   position: MapPoint | undefined;
   onZoomIn: () => void;
@@ -121,18 +97,14 @@ const ControlButtons = ({ position, onZoomIn, onZoomOut, onLocate, onOpenAmap }:
   );
 };
 
-// Custom Leaflet Control class
 class MapControlsContainer extends L.Control {
   private container: HTMLDivElement | undefined = undefined;
 
   onAdd() {
     this.container = L.DomUtil.create("div", "");
     this.container.style.pointerEvents = "auto";
-
-    // Prevent map interactions when clicking controls
     L.DomEvent.disableClickPropagation(this.container);
     L.DomEvent.disableScrollPropagation(this.container);
-
     return this.container;
   }
 
@@ -155,17 +127,35 @@ const MapControls = ({ position, onLocationSelect }: MapControlsProps) => {
   const controlRef = useRef<MapControlsContainer | null>(null);
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
 
-  // 跳转高德地图标注
   const handleOpenInAmap = () => {
     if (!position) return;
     const url = `https://uri.amap.com/marker?position=${position.lng},${position.lat}&name=选定位置`;
     window.open(url, "_blank", "noopener,noreferrer");
   };
 
-  // 手动点击重新触发定位
-  const handleLocate = () => {
-    map.locate({ setView: true, maxZoom: 15, enableHighAccuracy: true });
-    if (navigator.geolocation) {
+  // 混合定位：优先硬件 GPS，失败则无缝降级为高德 IP 城市定位
+  const handleLocate = async () => {
+    const tryAmapIpLocation = async () => {
+      try {
+        const res = await fetch(`https://restapi.amap.com/v3/ip?key=${AMAP_KEY}`);
+        const data = await res.json();
+        if (data.status === "1" && data.rectangle && typeof data.rectangle === "string") {
+          const points = data.rectangle.split(";")[0].split(",");
+          const lng = parseFloat(points[0]);
+          const lat = parseFloat(points[1]);
+          if (!isNaN(lat) && !isNaN(lng)) {
+            map.setView(new LatLng(lat, lng), 12);
+            onLocationSelect?.({ lat, lng });
+            return true;
+          }
+        }
+      } catch (e) {
+        console.error("高德 IP 定位失败:", e);
+      }
+      return false;
+    };
+
+    if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           const currentPoint = {
@@ -175,20 +165,15 @@ const MapControls = ({ position, onLocationSelect }: MapControlsProps) => {
           map.setView(new LatLng(currentPoint.lat, currentPoint.lng), 15);
           onLocationSelect?.(currentPoint);
         },
-        (err) => {
-          console.warn("获取定位失败:", err.message);
+        async () => {
+          // GPS 失败或被阻止时，自动使用高德 IP 定位
+          await tryAmapIpLocation();
         },
-        { enableHighAccuracy: true, timeout: 8000 },
+        { enableHighAccuracy: true, timeout: 3000 }
       );
+    } else {
+      await tryAmapIpLocation();
     }
-  };
-
-  const handleZoomIn = () => {
-    map.zoomIn();
-  };
-
-  const handleZoomOut = () => {
-    map.zoomOut();
   };
 
   useEffect(() => {
@@ -206,15 +191,13 @@ const MapControls = ({ position, onLocationSelect }: MapControlsProps) => {
     };
   }, [map]);
 
-  if (!container) {
-    return null;
-  }
+  if (!container) return null;
 
   return createPortal(
     <ControlButtons
       position={position}
-      onZoomIn={handleZoomIn}
-      onZoomOut={handleZoomOut}
+      onZoomIn={() => map.zoomIn()}
+      onZoomOut={() => map.zoomOut()}
       onLocate={handleLocate}
       onOpenAmap={handleOpenInAmap}
     />,
@@ -224,21 +207,17 @@ const MapControls = ({ position, onLocationSelect }: MapControlsProps) => {
 
 const MapCleanup = () => {
   const map = useMap();
-
   useEffect(() => {
     return () => {
       setTimeout(() => {
         if (map) {
           try {
             map.remove();
-          } catch {
-            // Ignore errors during cleanup
-          }
+          } catch {}
         }
       }, 0);
     };
   }, [map]);
-
   return null;
 };
 
@@ -254,7 +233,7 @@ const noopOnLocationChange = () => {};
 
 const LocationPicker = ({ readonly: readOnly = false, latlng, onChange = noopOnLocationChange, className }: LocationPickerProps) => {
   const mapCenter = useMemo(() => toLatLng(latlng ?? DEFAULT_CENTER), [latlng?.lat, latlng?.lng]);
-  const markerPosition = mapCenter;
+  const markerPosition = latlng ? toLatLng(latlng) : undefined;
   const statusLabel = readOnly ? "固定位置" : latlng ? "已选位置" : "选择位置";
 
   return (
