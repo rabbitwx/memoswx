@@ -1,87 +1,73 @@
-import { create } from "@bufbuild/protobuf";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useState } from "react";
 import type { MapPoint } from "@/components/map/types";
-import { Location, LocationSchema } from "@/types/proto/api/v1/memo_service_pb";
-import { LocationState } from "../types/insertMenu";
 
-export const useLocation = (initialLocation?: Location) => {
-  const [locationInitialized, setLocationInitialized] = useState(false);
-  const locationInitializedRef = useRef(locationInitialized);
-  locationInitializedRef.current = locationInitialized;
+const AMAP_KEY = "58fdd188849b29db42d76508868bf452";
 
-  const [state, setState] = useState<LocationState>({
-    placeholder: initialLocation?.placeholder || "",
-    position: initialLocation ? { lat: initialLocation.latitude, lng: initialLocation.longitude } : undefined,
-    latInput: initialLocation ? String(initialLocation.latitude) : "",
-    lngInput: initialLocation ? String(initialLocation.longitude) : "",
-  });
+export interface LocationState {
+  placeholder: string;
+  position?: MapPoint;
+}
 
-  // Ref to latest state so getLocation can be stable without closing over state.
-  const stateRef = useRef(state);
-  stateRef.current = state;
+export const useLocation = (initialLocation?: LocationState) => {
+  const [state, setState] = useState<LocationState>(
+    initialLocation ?? {
+      placeholder: "",
+      position: undefined,
+    }
+  );
+  const [locationInitialized, setLocationInitialized] = useState(Boolean(initialLocation?.position));
 
-  const updatePosition = useCallback((position?: MapPoint) => {
+  const handlePositionChange = (position: MapPoint) => {
     setState((prev) => ({
       ...prev,
       position,
-      latInput: position ? String(position.lat) : "",
-      lngInput: position ? String(position.lng) : "",
     }));
-  }, []);
+    setLocationInitialized(true);
+  };
 
-  // Stable — reads locationInitialized via ref to avoid recreating on every change.
-  const handlePositionChange = useCallback(
-    (position: MapPoint) => {
-      if (!locationInitializedRef.current) setLocationInitialized(true);
-      updatePosition(position);
-    },
-    [updatePosition],
-  );
-
-  // Stable — merges coordinate update into a single functional setState, avoiding closure over state.position.
-  const updateCoordinate = useCallback((type: "lat" | "lng", value: string) => {
-    const num = parseFloat(value);
-    const isValid = type === "lat" ? !isNaN(num) && num >= -90 && num <= 90 : !isNaN(num) && num >= -180 && num <= 180;
+  const updateCoordinate = (key: "lat" | "lng", value: number) => {
     setState((prev) => {
-      const next = { ...prev, [type === "lat" ? "latInput" : "lngInput"]: value };
-      if (isValid && prev.position) {
-        const newPos = type === "lat" ? { lat: num, lng: prev.position.lng } : { lat: prev.position.lat, lng: num };
-        return { ...next, position: newPos, latInput: String(newPos.lat), lngInput: String(newPos.lng) };
-      }
-      return next;
+      const position = prev.position ?? { lat: 39.9042, lng: 116.4074 };
+      return {
+        ...prev,
+        position: {
+          ...position,
+          [key]: value,
+        },
+      };
     });
-  }, []);
+    setLocationInitialized(true);
+  };
 
-  // Stable reference — uses functional setState, no closure deps.
-  const setPlaceholder = useCallback((placeholder: string) => {
-    setState((prev) => ({ ...prev, placeholder }));
-  }, []);
-
-  const reset = useCallback(() => {
-    setState({
-      placeholder: "",
-      position: undefined,
-      latInput: "",
-      lngInput: "",
-    });
-    setLocationInitialized(false);
-  }, []);
-
-  // Stable — reads latest state via ref, no closure over state.
-  const getLocation = useCallback((): Location | undefined => {
-    const { position, placeholder } = stateRef.current;
-    if (!position || !placeholder.trim()) {
-      return undefined;
-    }
-    return create(LocationSchema, {
-      latitude: position.lat,
-      longitude: position.lng,
+  const setPlaceholder = (placeholder: string) => {
+    setState((prev) => ({
+      ...prev,
       placeholder,
-    });
-  }, []);
+    }));
+  };
 
-  return useMemo(
-    () => ({ state, locationInitialized, handlePositionChange, updateCoordinate, setPlaceholder, reset, getLocation }),
-    [state, locationInitialized, handlePositionChange, updateCoordinate, setPlaceholder, reset, getLocation],
-  );
+  const reset = () => {
+    setState(
+      initialLocation ?? {
+        placeholder: "",
+        position: undefined,
+      }
+    );
+    setLocationInitialized(Boolean(initialLocation?.position));
+  };
+
+  const getLocation = () => {
+    if (!state.position) return undefined;
+    return state;
+  };
+
+  return {
+    state,
+    locationInitialized,
+    handlePositionChange,
+    updateCoordinate,
+    setPlaceholder,
+    reset,
+    getLocation,
+  };
 };
