@@ -31,7 +31,7 @@ import { useEditorContext, useEditorSelector } from "../state";
 import type { InsertMenuProps } from "../types";
 import type { LocalFile } from "../types/attachment";
 
-const AMAP_KEY = "58fdd188849b29db42d76508868bf452";
+const AMAP_KEY = "146dac968efd2ed50c05a3c3fa2c8cf6";
 
 const InsertMenu = (props: InsertMenuProps) => {
   const t = useTranslate();
