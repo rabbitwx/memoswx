@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 // 填入你的高德 Web服务 Key
-const AMAP_KEY = "58fdd188849b29db42d76508868bf452"; // 请确认填入完整的Key
+const AMAP_KEY = "146dac968efd2ed50c05a3c3fa2c8cf6"; // 请确认填入完整的Key
 
 export const useReverseGeocoding = (lat: number | undefined, lng: number | undefined) => {
   return useQuery({
